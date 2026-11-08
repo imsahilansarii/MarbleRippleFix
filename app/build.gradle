@@ -13,12 +13,27 @@ android {
         versionCode 1
         versionName "1.0"
     }
+
+    signingConfigs {
+        fixed {
+            File ks = file("release.jks")
+            if (!ks.exists()) {
+                ["keytool", "-genkey", "-v", "-keystore", ks.absolutePath, "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000", "-alias", "sahil", "-storepass", "sahil123", "-keypass", "sahil123", "-dname", "CN=Sahil Ansari, O=MarbleRippleFix, C=IN"].execute().waitFor()
+            }
+            storeFile ks
+            storePassword "sahil123"
+            keyAlias "sahil"
+            keyPassword "sahil123"
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.create("fixed") { storeFile file("release.jks"); storePassword "sahil123"; keyAlias "sahil"; keyPassword "sahil123" }
+            signingConfig signingConfigs.fixed
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
