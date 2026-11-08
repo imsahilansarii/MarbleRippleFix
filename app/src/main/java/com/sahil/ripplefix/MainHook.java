@@ -28,7 +28,6 @@ public class MainHook implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                 sRippleController = param.thisObject;
-                XposedBridge.log("MarbleRippleFix: Captured AuthRippleController!");
             }
         });
 
@@ -107,11 +106,9 @@ public class MainHook implements IXposedHookLoadPackage {
                             if (m.getParameterCount() == 2) {
                                 m.invoke(null, sRippleController, fpType);
                                 triggered = true;
-                                XposedBridge.log("MarbleRippleFix: Fired access$showUnlockRippleInternal(ctrl, FP)!");
                             } else if (m.getParameterCount() == 1) {
                                 m.invoke(sRippleController, fpType);
                                 triggered = true;
-                                XposedBridge.log("MarbleRippleFix: Fired access$showUnlockRippleInternal(FP)!");
                             }
                         }
                     }
@@ -123,16 +120,13 @@ public class MainHook implements IXposedHookLoadPackage {
                                 m.setAccessible(true);
                                 if (m.getParameterCount() == 0) {
                                     m.invoke(sRippleController);
-                                    XposedBridge.log("MarbleRippleFix: Fired showUnlockedRipple()!");
                                 } else if (m.getParameterCount() == 1) {
                                     m.invoke(sRippleController, fpType);
-                                    XposedBridge.log("MarbleRippleFix: Fired showUnlockedRipple(FP)!");
                                 }
                             }
                         }
                     }
                 } catch (Throwable t) {
-                    XposedBridge.log("MarbleRippleFix Error: " + t.toString());
                 }
             }
         };
