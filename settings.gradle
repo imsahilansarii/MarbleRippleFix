@@ -1,0 +1,2 @@
+rootProject.name = "MarbleRippleFix"
+include ':app'
