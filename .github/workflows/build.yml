@@ -1,9 +1,13 @@
-name: Build & Send APK to Telegram
+name: Build & Release APK
 
 on:
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -26,17 +30,37 @@ jobs:
       - name: Build Release APK
         run: gradle assembleRelease
 
+      - name: Save Keystore Permanently to Repo
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        run: |
+          if [ -n "$(git status --porcelain app/release.jks)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add app/release.jks
+            git commit -m "Lock permanent release.jks keystore [skip ci]"
+            git push
+          fi
+
+      - name: Prepare APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          cp "$APK_PATH" MarbleRippleFix-v1.1.apk
+
       - name: Send APK to Telegram
         env:
           BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
-          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          cp "$APK_PATH" MarbleRippleFix.apk
           COMMIT_MSG=$(git log -1 --pretty=%B)
           curl -s -F chat_id="$CHAT_ID" \
-               -F document=@"MarbleRippleFix.apk" \
+               -F document=@"MarbleRippleFix-v1.1.apk" \
                -F parse_mode="Markdown" \
-               -F caption="✅ *MarbleRippleFix APK Ready!*
-          📝 *Commit:* \`$COMMIT_MSG\`" \
+               -F caption="✅ *MarbleRippleFix v1.1 (Permanent Signature)*" \
                "https://api.telegram.org/bot$BOT_TOKEN/sendDocument"
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MarbleRippleFix-v1.1.apk
+          generate_release_notes: true
