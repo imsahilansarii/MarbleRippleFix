@@ -1,6 +1,7 @@
 package com.sahil.ripplefix;
 
 import android.graphics.Point;
+import android.util.DisplayMetrics;
 import android.view.View;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -12,7 +13,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class MainHook implements IXposedHookLoadPackage {
     private static Object sRippleController = null;
+    private static Method sInternalMethod = null;
+    private static Method sPublicMethod = null;
+    private static Object sFpSourceType = null;
     private static long sLastRippleTime = 0;
+    private static final Point SENSOR_POINT = new Point(1080, 1025);
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -20,10 +25,24 @@ public class MainHook implements IXposedHookLoadPackage {
 
         Class<?> rippleCtrlClass = XposedHelpers.findClassIfExists(
                 "com.android.systemui.biometrics.AuthRippleController", lpparam.classLoader);
-
         if (rippleCtrlClass == null) return;
 
-        // Capture AuthRippleController instance & log its fields
+        try {
+            Class<?> bioTypeClass = XposedHelpers.findClass(
+                    "android.hardware.biometrics.BiometricSourceType", lpparam.classLoader);
+            sFpSourceType = Enum.valueOf((Class<Enum>) bioTypeClass, "FINGERPRINT");
+        } catch (Throwable ignored) {}
+
+        for (Method m : rippleCtrlClass.getDeclaredMethods()) {
+            if (m.getName().equals("access$showUnlockRippleInternal")) {
+                m.setAccessible(true);
+                sInternalMethod = m;
+            } else if (m.getName().equals("showUnlockedRipple")) {
+                m.setAccessible(true);
+                sPublicMethod = m;
+            }
+        }
+
         XposedBridge.hookAllConstructors(rippleCtrlClass, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -31,116 +50,73 @@ public class MainHook implements IXposedHookLoadPackage {
             }
         });
 
-        // Also ensure whenever showUnlockedRipple runs, sensor coordinates & view bounds are valid
         XposedBridge.hookAllMethods(rippleCtrlClass, "showUnlockedRipple", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 Object ctrl = param.thisObject;
                 try {
-                    XposedHelpers.setObjectField(ctrl, "fingerprintSensorLocation", new Point(1080, 1025));
+                    XposedHelpers.setObjectField(ctrl, "fingerprintSensorLocation", SENSOR_POINT);
                 } catch (Throwable ignored) {}
-
-                // Find the AuthRippleView field inside controller (even if obfuscated or named mView)
                 for (Field f : ctrl.getClass().getDeclaredFields()) {
                     f.setAccessible(true);
                     Object val = f.get(ctrl);
-                    if (val instanceof View) {
-                        View v = (View) val;
-                        v.setVisibility(View.VISIBLE);
-                        if (v.getWidth() == 0 || v.getHeight() == 0) {
-                            v.layout(0, 0, 1080, 2400);
-                        }
-                        try {
-                            XposedHelpers.callMethod(v, "setFingerprintSensorLocation", new Point(1080, 1025), 0f);
-                        } catch (Throwable e1) {
-                            try {
-                                XposedHelpers.callMethod(v, "setFingerprintSensorLocation", new Point(1080, 1025));
-                            } catch (Throwable ignored) {}
-                        }
-                    }
+                    if (val instanceof View) prepareRippleView((View) val);
                 }
-                // Check superclass fields too (ViewController.mView)
                 try {
                     Field mViewField = XposedHelpers.findFieldIfExists(ctrl.getClass().getSuperclass(), "mView");
                     if (mViewField != null) {
                         mViewField.setAccessible(true);
                         View v = (View) mViewField.get(ctrl);
-                        if (v != null) {
-                            v.setVisibility(View.VISIBLE);
-                            if (v.getWidth() == 0 || v.getHeight() == 0) {
-                                v.layout(0, 0, 1080, 2400);
-                            }
-                            try {
-                                XposedHelpers.callMethod(v, "setFingerprintSensorLocation", new Point(1080, 1025), 0f);
-                            } catch (Throwable e1) {
-                                try {
-                                    XposedHelpers.callMethod(v, "setFingerprintSensorLocation", new Point(1080, 1025));
-                                } catch (Throwable ignored) {}
-                            }
-                        }
+                        if (v != null) prepareRippleView(v);
                     }
                 } catch (Throwable ignored) {}
             }
         });
 
-        // Trigger function with 500ms debounce so it doesn't fire twice at the same millisecond
-        final Runnable triggerRipple = new Runnable() {
-            @Override
-            public void run() {
-                long now = System.currentTimeMillis();
-                if (now - sLastRippleTime < 500) return;
-                sLastRippleTime = now;
-
-                if (sRippleController == null) return;
-
-                try {
-                    // 1. Try access$showUnlockRippleInternal(AuthRippleController, BiometricSourceType)
-                    Class<?> bioTypeClass = XposedHelpers.findClass(
-                            "android.hardware.biometrics.BiometricSourceType", lpparam.classLoader);
-                    Object fpType = Enum.valueOf((Class<Enum>) bioTypeClass, "FINGERPRINT");
-
-                    boolean triggered = false;
-                    for (Method m : sRippleController.getClass().getDeclaredMethods()) {
-                        if (m.getName().equals("access$showUnlockRippleInternal")) {
-                            m.setAccessible(true);
-                            if (m.getParameterCount() == 2) {
-                                m.invoke(null, sRippleController, fpType);
-                                triggered = true;
-                            } else if (m.getParameterCount() == 1) {
-                                m.invoke(sRippleController, fpType);
-                                triggered = true;
-                            }
-                        }
-                    }
-
-                    // 2. Also call showUnlockedRipple() directly
-                    if (!triggered) {
-                        for (Method m : sRippleController.getClass().getDeclaredMethods()) {
-                            if (m.getName().equals("showUnlockedRipple")) {
-                                m.setAccessible(true);
-                                if (m.getParameterCount() == 0) {
-                                    m.invoke(sRippleController);
-                                } else if (m.getParameterCount() == 1) {
-                                    m.invoke(sRippleController, fpType);
-                                }
-                            }
-                        }
-                    }
-                } catch (Throwable t) {
-                }
-            }
-        };
-
-        // Hook KeyguardUpdateMonitor.onFingerprintAuthenticated
         Class<?> kumClass = XposedHelpers.findClassIfExists(
                 "com.android.keyguard.KeyguardUpdateMonitor", lpparam.classLoader);
         if (kumClass != null) {
             XposedBridge.hookAllMethods(kumClass, "onFingerprintAuthenticated", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    triggerRipple.run();
+                    long now = System.currentTimeMillis();
+                    if (now - sLastRippleTime < 450 || sRippleController == null) return;
+                    sLastRippleTime = now;
+
+                    try {
+                        if (sInternalMethod != null && sFpSourceType != null) {
+                            if (sInternalMethod.getParameterCount() == 2) {
+                                sInternalMethod.invoke(null, sRippleController, sFpSourceType);
+                            } else {
+                                sInternalMethod.invoke(sRippleController, sFpSourceType);
+                            }
+                        } else if (sPublicMethod != null) {
+                            if (sPublicMethod.getParameterCount() == 0) {
+                                sPublicMethod.invoke(sRippleController);
+                            } else {
+                                sPublicMethod.invoke(sRippleController, sFpSourceType);
+                            }
+                        }
+                    } catch (Throwable ignored) {}
                 }
             });
+        }
+    }
+
+    private static void prepareRippleView(View v) {
+        v.setVisibility(View.VISIBLE);
+        if (v.getWidth() == 0 || v.getHeight() == 0) {
+            DisplayMetrics dm = v.getResources().getDisplayMetrics();
+            int w = dm.widthPixels > 0 ? dm.widthPixels : 1080;
+            int h = dm.heightPixels > 0 ? dm.heightPixels : 2400;
+            v.layout(0, 0, w, h);
+        }
+        try {
+            XposedHelpers.callMethod(v, "setFingerprintSensorLocation", SENSOR_POINT, 0f);
+        } catch (Throwable e1) {
+            try {
+                XposedHelpers.callMethod(v, "setFingerprintSensorLocation", SENSOR_POINT);
+            } catch (Throwable ignored) {}
         }
     }
 }
