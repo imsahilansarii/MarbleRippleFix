@@ -1,4 +1,4 @@
-# 🌊 Marble Ripple Fix (v1.1)
+# 🌊 Marble Ripple animation Fix (v1.1)
 
 > **📌 Note:** I created this module as a **temporary fix** specifically for **Evolution X 12.3** on **POCO F5 / Redmi Note 12 Turbo (`marble`)**, where the biometric unlock ripple animation was broken after the ROM switched to the Stock Xiaomi Fingerprint HAL.
 
