@@ -16,7 +16,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.create("fixed") { storeFile file("release.jks"); storePassword "sahil123"; keyAlias "sahil"; keyPassword "sahil123" }
         }
     }
     compileOptions {
